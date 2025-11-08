@@ -476,13 +476,22 @@ def create_travel_checkin(db: Session, user_id: str, checkin: schemas.TravelChec
     db.commit()
     db.refresh(db_checkin)
     
+    # Check if at a breakthrough level and auto-complete breakthrough
+    at_breakthrough = (pet.level % 5 == 0) and (pet.level >= 5) and not pet.breakthrough_completed
+    if at_breakthrough:
+        pet.breakthrough_completed = True
+        pet.stage = get_stage_for_level(pet.level, pet.breakthrough_completed)
+        db.commit()
+        db.refresh(pet)
+    
     # Apply rewards using update_pet_stats for proper level-up logic
+    # Give stamina reward for travel checkin
     result = update_pet_stats(
         db=db,
         pet=pet,
         strength=15,
-        stamina=0,
+        stamina=10,  # Add stamina reward
         mood=10
     )
     
-    return {"pet": result["pet"], "checkin": db_checkin}
+    return {"pet": result["pet"], "checkin": db_checkin, "breakthrough_completed": at_breakthrough}
