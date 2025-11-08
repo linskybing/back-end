@@ -317,24 +317,28 @@ def get_daily_quest_status(db: Session, user_id: str):
     }
 
 def claim_daily_quest_reward(db: Session, user_id: str, quest_id: int):
-    """Claim reward for a completed daily quest"""
+    """Claim reward for a completed daily quest (can only claim once)"""
     try:
         pet = get_pet_by_user_id(db, user_id)
         if not pet:
             return None
         
-        # Check quest completion status
+        # Check quest completion status and if already claimed
         if quest_id == 1:
             if not pet.daily_quest_1_completed:
                 return {"success": False, "message": "Quest not completed yet"}
+            # Mark as not completed after claiming (prevents re-claiming)
+            pet.daily_quest_1_completed = False
             quest_def = DAILY_QUEST_DEFINITIONS[0]
         elif quest_id == 2:
             if not pet.daily_quest_2_completed:
                 return {"success": False, "message": "Quest not completed yet"}
+            pet.daily_quest_2_completed = False
             quest_def = DAILY_QUEST_DEFINITIONS[1]
         elif quest_id == 3:
             if not pet.daily_quest_3_completed:
                 return {"success": False, "message": "Quest not completed yet"}
+            pet.daily_quest_3_completed = False
             quest_def = DAILY_QUEST_DEFINITIONS[2]
         else:
             return {"success": False, "message": "Invalid quest ID"}
