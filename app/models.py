@@ -6,12 +6,12 @@ import enum
 from .database import Base
 
 # Define pet growth stages
-class PetStage(str, enum.Enum):
-    EGG = "蛋"
-    CHICK = "小雞"
-    CHICKEN = "中雞"
-    BIG_CHICKEN = "大雞"
-    BUFF_CHICKEN = "大胸雞"
+class PetStage(int, enum.Enum):
+    EGG = 0
+    CHICK = 1
+    CHICKEN = 2
+    BIG_CHICKEN = 3
+    BUFF_CHICKEN = 4
 
 class User(Base):
     __tablename__ = "users"

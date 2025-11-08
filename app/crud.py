@@ -74,6 +74,17 @@ def get_stage_for_level(level: int) -> models.PetStage:
             stage = stg
     return stage
 
+def update_pet(db: Session, pet: models.Pet, update_data: schemas.PetUpdate):
+    """Generic update function that allows updating any pet attribute"""
+    update_dict = update_data.dict(exclude_unset=True)
+    
+    for key, value in update_dict.items():
+        setattr(pet, key, value)
+    
+    db.commit()
+    db.refresh(pet)
+    return pet
+
 def update_pet_stats(db: Session, pet: models.Pet, 
                      growth: int = 0, strength: int = 0, 
                      stamina: int = 0, satiety: int = 0, mood: int = 0):

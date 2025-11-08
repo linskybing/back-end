@@ -74,29 +74,28 @@ def get_user_pet(user_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Pet not found for this user")
     return pet
 
-@app.post("/users/{user_id}/pet/feed", response_model=schemas.Pet, tags=["Pet"])
-def feed_pet(user_id: int, db: Session = Depends(get_db)):
+@app.patch("/users/{user_id}/pet", response_model=schemas.Pet, tags=["Pet"])
+def update_user_pet(user_id: int, pet_update: schemas.PetUpdate, db: Session = Depends(get_db)):
     """
-    Feed the pet.
-    - Effect: Satiety +20, Mood +5
+    Update any attributes of the user's pet.
+    
+    You can update any combination of:
+    - name: Pet name
+    - strength: Strength value
+    - stamina: Stamina value (0-100)
+    - satiety: Satiety value (0-100)
+    - mood: Mood value (0-100)
+    - growth_points: Growth points (EXP)
+    - level: Pet level
+    - stage: Growth stage (0-4)
+    
+    Only the fields you provide will be updated.
     """
     pet = crud.get_pet_by_user_id(db, user_id)
     if not pet:
         raise HTTPException(status_code=404, detail="Pet not found")
     
-    return crud.update_pet_stats(db, pet, satiety=20, mood=5)
-
-@app.post("/users/{user_id}/pet/play", response_model=schemas.Pet, tags=["Pet"])
-def play_with_pet(user_id: int, db: Session = Depends(get_db)):
-    """
-    Play with the pet.
-    - Effect: Mood +15, Satiety -5, Stamina -5
-    """
-    pet = crud.get_pet_by_user_id(db, user_id)
-    if not pet:
-        raise HTTPException(status_code=404, detail="Pet not found")
-        
-    return crud.update_pet_stats(db, pet, mood=15, satiety=-5, stamina=-5)
+    return crud.update_pet(db, pet, pet_update)
 
 # ==================
 # Exercise

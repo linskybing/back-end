@@ -20,6 +20,16 @@ class PetBase(BaseModel):
 class PetCreate(PetBase):
     pass
 
+class PetUpdate(BaseModel):
+    name: Optional[str] = None
+    strength: Optional[int] = None
+    stamina: Optional[int] = None
+    satiety: Optional[int] = None
+    mood: Optional[int] = None
+    growth_points: Optional[int] = None
+    level: Optional[int] = None
+    stage: Optional[PetStage] = None
+
 class UserBase(BaseModel):
     username: str
     email: str
