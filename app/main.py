@@ -160,6 +160,51 @@ def complete_daily_quest(user_id: str, user_quest_id: int, db: Session = Depends
     return result
 
 # ==================
+# Daily Quest System (Independent)
+# ==================
+@app.get("/users/{user_id}/daily-quests", tags=["Daily Quests"])
+def get_daily_quests(user_id: str, db: Session = Depends(get_db)):
+    """
+    Get current status of all daily quests.
+    
+    Returns:
+    - Quest 1: 每日登入 (auto-completed on daily-check)
+    - Quest 2: 運動十分鐘 (600 seconds exercise)
+    - Quest 3: 走路5000步 (5000 steps)
+    
+    Each quest shows:
+    - completed: bool
+    - progress: current progress value
+    - goal: target value
+    - rewards: strength, stamina, mood
+    """
+    result = crud.get_daily_quest_status(db, user_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Pet not found")
+    return result
+
+@app.post("/users/{user_id}/daily-quests/{quest_id}/claim", tags=["Daily Quests"])
+def claim_daily_quest(user_id: str, quest_id: int, db: Session = Depends(get_db)):
+    """
+    Claim reward for a completed daily quest.
+    
+    Quest IDs:
+    - 1: 每日登入
+    - 2: 運動十分鐘
+    - 3: 走路5000步
+    
+    Returns error if quest is not completed yet.
+    """
+    result = crud.claim_daily_quest_reward(db, user_id, quest_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Pet not found")
+    
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("message", "Cannot claim reward"))
+    
+    return result
+
+# ==================
 # Daily Check
 # ==================
 @app.post("/users/{user_id}/daily-check", tags=["Pet"])

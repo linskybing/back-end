@@ -45,6 +45,11 @@ class Pet(Base):
     daily_steps = Column(Integer, default=0) # Today's accumulated walking steps
     last_reset_date = Column(DateTime(timezone=True), nullable=True) # Last date when daily stats were reset
     
+    # Daily quest tracking (independent system)
+    daily_quest_1_completed = Column(Boolean, default=False) # Quest 1: 每日登入
+    daily_quest_2_completed = Column(Boolean, default=False) # Quest 2: 運動十分鐘
+    daily_quest_3_completed = Column(Boolean, default=False) # Quest 3: 走路5000步
+    
     # Breakthrough tracking
     breakthrough_completed = Column(Boolean, default=False) # Tracks if breakthrough is needed
     last_daily_check = Column(DateTime(timezone=True), nullable=True) # Last time daily check was performed

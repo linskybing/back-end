@@ -243,6 +243,15 @@ def log_exercise(db: Session, user_id: str, log: schemas.ExerciseLogCreate):
         pet.daily_exercise_seconds += log.duration_seconds
         pet.daily_steps += log.steps
         
+        # Auto-complete daily quests if conditions met
+        # Quest 2: 運動十分鐘 (600 seconds)
+        if pet.daily_exercise_seconds >= 600 and not pet.daily_quest_2_completed:
+            pet.daily_quest_2_completed = True
+        
+        # Quest 3: 走路5000步
+        if pet.daily_steps >= 5000 and not pet.daily_quest_3_completed:
+            pet.daily_quest_3_completed = True
+        
         # Calculate pet stat changes based on exercise duration
         # 10 seconds = 1 strength point
         strength_gain = log.duration_seconds // 10
@@ -264,14 +273,138 @@ def log_exercise(db: Session, user_id: str, log: schemas.ExerciseLogCreate):
         raise e
 
 # ==================
+# Daily Quest System (Independent)
+# ==================
+
+# Daily quest definitions
+DAILY_QUEST_DEFINITIONS = [
+    {
+        "id": 1,
+        "title": "每日登入",
+        "description": "今天第一次登入遊戲",
+        "reward_strength": 10,
+        "reward_stamina": 20,
+        "reward_mood": 5
+    },
+    {
+        "id": 2,
+        "title": "運動十分鐘",
+        "description": "累積運動時間達到10分鐘",
+        "reward_strength": 30,
+        "reward_stamina": 15,
+        "reward_mood": 10
+    },
+    {
+        "id": 3,
+        "title": "走路5000步",
+        "description": "今日累積走路5000步",
+        "reward_strength": 50,
+        "reward_stamina": 20,
+        "reward_mood": 15
+    }
+]
+
+def get_daily_quest_status(db: Session, user_id: str):
+    """Get current status of all daily quests"""
+    pet = get_pet_by_user_id(db, user_id)
+    if not pet:
+        return None
+    
+    return {
+        "quests": [
+            {
+                "id": 1,
+                "title": "每日登入",
+                "description": "今天第一次登入遊戲",
+                "completed": pet.daily_quest_1_completed,
+                "progress": 1 if pet.daily_quest_1_completed else 0,
+                "goal": 1,
+                "reward_strength": 10,
+                "reward_stamina": 20,
+                "reward_mood": 5
+            },
+            {
+                "id": 2,
+                "title": "運動十分鐘",
+                "description": "累積運動時間達到10分鐘",
+                "completed": pet.daily_quest_2_completed,
+                "progress": pet.daily_exercise_seconds,
+                "goal": 600,
+                "reward_strength": 30,
+                "reward_stamina": 15,
+                "reward_mood": 10
+            },
+            {
+                "id": 3,
+                "title": "走路5000步",
+                "description": "今日累積走路5000步",
+                "completed": pet.daily_quest_3_completed,
+                "progress": pet.daily_steps,
+                "goal": 5000,
+                "reward_strength": 50,
+                "reward_stamina": 20,
+                "reward_mood": 15
+            }
+        ],
+        "last_reset_date": pet.last_reset_date
+    }
+
+def claim_daily_quest_reward(db: Session, user_id: str, quest_id: int):
+    """Claim reward for a completed daily quest"""
+    try:
+        pet = get_pet_by_user_id(db, user_id)
+        if not pet:
+            return None
+        
+        # Check quest completion status
+        if quest_id == 1:
+            if not pet.daily_quest_1_completed:
+                return {"success": False, "message": "Quest not completed yet"}
+            quest_def = DAILY_QUEST_DEFINITIONS[0]
+        elif quest_id == 2:
+            if not pet.daily_quest_2_completed:
+                return {"success": False, "message": "Quest not completed yet"}
+            quest_def = DAILY_QUEST_DEFINITIONS[1]
+        elif quest_id == 3:
+            if not pet.daily_quest_3_completed:
+                return {"success": False, "message": "Quest not completed yet"}
+            quest_def = DAILY_QUEST_DEFINITIONS[2]
+        else:
+            return {"success": False, "message": "Invalid quest ID"}
+        
+        # Apply rewards
+        result = update_pet_stats(
+            db=db,
+            pet=pet,
+            strength=quest_def["reward_strength"],
+            stamina=quest_def["reward_stamina"],
+            mood=quest_def["reward_mood"]
+        )
+        
+        return {
+            "success": True,
+            "message": f"Claimed reward for {quest_def['title']}",
+            "pet": result["pet"],
+            "rewards": {
+                "strength": quest_def["reward_strength"],
+                "stamina": quest_def["reward_stamina"],
+                "mood": quest_def["reward_mood"]
+            }
+        }
+    except Exception as e:
+        db.rollback()
+        print(f"Error in claim_daily_quest_reward: {e}")
+        raise e
+
+# ==================
 # Quest
 # ==================
 
 # Simple daily quest system
 QUEST_TEMPLATES = [
-    {"title": "Daily Check-in", "description": "Log in to the app", "reward_mood": 5, "reward_stamina": 10},
-    {"title": "Complete 1 Exercise", "description": "Complete one exercise of any type", "reward_strength": 20, "reward_stamina": 10},
-    {"title": "Full of Energy", "description": "Accumulate 100 exercise volume", "reward_strength": 50, "reward_mood": 10},
+    {"title": "每日登入", "description": "今天第一次登入遊戲", "reward_mood": 5, "reward_stamina": 10, "reward_strength": 0},
+    {"title": "運動十分鐘", "description": "累積運動時間達到10分鐘", "reward_strength": 20, "reward_stamina": 10, "reward_mood": 0},
+    {"title": "走路5000步", "description": "今日累積走路5000步", "reward_strength": 30, "reward_mood": 10, "reward_stamina": 0},
 ]
 
 def get_or_create_daily_quests(db: Session, user_id: str):
@@ -415,6 +548,11 @@ def perform_daily_check(db: Session, user_id: str):
         pet.daily_exercise_seconds = 0
         pet.daily_steps = 0
         pet.last_reset_date = now
+        
+        # Reset daily quests and complete Quest 1 (daily login)
+        pet.daily_quest_1_completed = True  # Quest 1: 每日登入 (auto-complete on login)
+        pet.daily_quest_2_completed = False  # Quest 2: 運動十分鐘
+        pet.daily_quest_3_completed = False  # Quest 3: 走路5000步
         
         if not met_requirement:
             # Didn't meet requirement - decrease mood

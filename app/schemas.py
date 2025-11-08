@@ -17,6 +17,9 @@ class PetBase(BaseModel):
     breakthrough_completed: bool = False
     daily_exercise_seconds: int = 0
     daily_steps: int = 0
+    daily_quest_1_completed: bool = False
+    daily_quest_2_completed: bool = False
+    daily_quest_3_completed: bool = False
 
 class PetCreate(PetBase):
     pass
@@ -31,6 +34,9 @@ class PetUpdate(BaseModel):
     breakthrough_completed: Optional[bool] = None
     daily_exercise_seconds: Optional[int] = None
     daily_steps: Optional[int] = None
+    daily_quest_1_completed: Optional[bool] = None
+    daily_quest_2_completed: Optional[bool] = None
+    daily_quest_3_completed: Optional[bool] = None
 
 class UserBase(BaseModel):
     pass
