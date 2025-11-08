@@ -90,12 +90,49 @@ def get_stage_for_level(level: int, breakthrough_completed: bool) -> models.PetS
     return stage
 
 def update_pet(db: Session, pet: models.Pet, update_data: schemas.PetUpdate):
-    """Generic update function that allows updating any pet attribute"""
+    """
+    Generic update function that allows updating any pet attribute.
+    For strength/stamina/mood updates, uses the same logic as update_pet_stats.
+    """
     update_dict = update_data.dict(exclude_unset=True)
     
+    # Separate stat updates (strength, stamina, mood) from other updates
+    stat_updates = {}
+    other_updates = {}
+    
     for key, value in update_dict.items():
+        if key in ["strength", "stamina", "mood"]:
+            stat_updates[key] = value
+        else:
+            other_updates[key] = value
+    
+    # Apply non-stat updates directly
+    for key, value in other_updates.items():
         setattr(pet, key, value)
     
+    # If there are stat updates, use update_pet_stats logic
+    if stat_updates:
+        # Get current values
+        current_strength = pet.strength
+        current_stamina = pet.stamina
+        current_mood = pet.mood
+        
+        # Calculate deltas (difference from current to new value)
+        strength_delta = stat_updates.get("strength", current_strength) - current_strength
+        stamina_delta = stat_updates.get("stamina", current_stamina) - current_stamina
+        mood_delta = stat_updates.get("mood", current_mood) - current_mood
+        
+        # Use update_pet_stats to apply changes with level-up logic
+        result = update_pet_stats(
+            db=db,
+            pet=pet,
+            strength=strength_delta,
+            stamina=stamina_delta,
+            mood=mood_delta
+        )
+        return result["pet"]
+    
+    # If only non-stat updates, just commit
     db.commit()
     db.refresh(pet)
     return pet
@@ -249,7 +286,9 @@ def complete_quest(db: Session, user_id: int, user_quest_id: int):
     if not uq or uq.is_completed:
         return None # Quest doesn't exist or is already completed
     
+    # Mark quest as completed
     uq.is_completed = True
+    db.commit()  # Commit the quest completion first
     
     # Apply rewards
     pet = get_pet_by_user_id(db, user_id)
@@ -261,7 +300,7 @@ def complete_quest(db: Session, user_id: int, user_quest_id: int):
         mood=uq.quest.reward_mood
     )
     
-    db.commit()
+    # No need to commit again - update_pet_stats already commits
     return result
 
 # ==================
@@ -417,14 +456,42 @@ def create_travel_checkin(db: Session, user_id: int, checkin: schemas.TravelChec
     pet = get_pet_by_user_id(db, user_id)
     if not pet:
         raise ValueError("Pet not found")
-    existing = db.query(models.TravelCheckin).filter(models.TravelCheckin.user_id == user_id).filter(models.TravelCheckin.quest_id == checkin.quest_id).first()
+    
+    # Check if already checked in at this location
+    existing = db.query(models.TravelCheckin).filter(
+        models.TravelCheckin.user_id == user_id,
+        models.TravelCheckin.quest_id == checkin.quest_id
+    ).first()
     if existing:
         raise ValueError("Already checked in at this location")
-    db_checkin = models.TravelCheckin(user_id=user_id, quest_id=checkin.quest_id, lat=checkin.lat, lng=checkin.lng)
+    
+    # Create checkin record
+    db_checkin = models.TravelCheckin(
+        user_id=user_id, 
+        quest_id=checkin.quest_id, 
+        lat=checkin.lat, 
+        lng=checkin.lng
+    )
     db.add(db_checkin)
-    pet.strength = min(pet.strength + 15, 120)
-    pet.mood = min(pet.mood + 10, 100)
     db.commit()
     db.refresh(db_checkin)
-    db.refresh(pet)
-    return {"pet": pet, "checkin": db_checkin}
+    
+    # Check if at a breakthrough level and auto-complete breakthrough
+    at_breakthrough = (pet.level % 5 == 0) and (pet.level >= 5) and not pet.breakthrough_completed
+    if at_breakthrough:
+        pet.breakthrough_completed = True
+        pet.stage = get_stage_for_level(pet.level, pet.breakthrough_completed)
+        db.commit()
+        db.refresh(pet)
+    
+    # Apply rewards using update_pet_stats for proper level-up logic
+    # Give stamina reward for travel checkin
+    result = update_pet_stats(
+        db=db,
+        pet=pet,
+        strength=15,
+        stamina=10,  # Add stamina reward
+        mood=10
+    )
+    
+    return {"pet": result["pet"], "checkin": db_checkin, "breakthrough_completed": at_breakthrough}

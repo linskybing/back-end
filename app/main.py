@@ -78,15 +78,10 @@ def read_user(user_id: int, db: Session = Depends(get_db)):
 def get_user_pet(user_id: int, db: Session = Depends(get_db)):
     """
     Get the current status of the specified user's pet.
-    Automatically resets daily stats if it's a new day.
     """
     pet = crud.get_pet_by_user_id(db, user_id=user_id)
     if pet is None:
         raise HTTPException(status_code=404, detail="Pet not found for this user")
-    
-    # Reset daily stats if needed (new day)
-    crud.reset_daily_stats_if_needed(db, pet)
-    db.refresh(pet)
     
     return pet
 
