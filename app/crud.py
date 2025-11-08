@@ -273,41 +273,69 @@ def perform_daily_check(db: Session, user_id: int):
     if not pet:
         return None
     
-    now = datetime.now()
-    today_start = datetime.combine(date.today(), time.min)
-    
-    # Check if daily check already performed today
-    if pet.last_daily_check and pet.last_daily_check >= today_start:
-        return {"pet": pet, "already_checked": True}
-    
-    # Get yesterday's exercise logs
-    yesterday_start = today_start - timedelta(days=1)
-    yesterday_exercises = db.query(models.ExerciseLog).filter(
-        models.ExerciseLog.user_id == user_id,
-        models.ExerciseLog.created_at >= yesterday_start,
-        models.ExerciseLog.created_at < today_start
-    ).all()
-    
-    # Calculate total strength points gained yesterday (10 seconds = 1 point)
-    total_strength_yesterday = sum(log.duration_seconds // 10 for log in yesterday_exercises)
-    
-    # Check if met minimum requirement (60 points = 10 minutes)
-    if total_strength_yesterday < MIN_DAILY_STRENGTH:
-        # Didn't meet requirement - decrease mood
-        # But only if stamina > 0 (if stamina is 0, they exercised enough)
-        if pet.stamina > 0:
-            pet.mood = max(0, pet.mood - 10)
+    try:
+        now = datetime.now()
+        today_start = datetime.combine(date.today(), time.min)
+        
+        # Check if daily check already performed today
+        if pet.last_daily_check:
+            # Need to make both timezone-aware or both naive for comparison
+            pet_check_date = pet.last_daily_check
+            if pet_check_date.tzinfo is None:
+                pet_check_date = pet_check_date.replace(tzinfo=None)
+                today_start = today_start.replace(tzinfo=None)
             
-            # If mood reaches 0 and strength > 0, decrease strength
-            if pet.mood == 0 and pet.strength > 0:
-                pet.strength = max(0, pet.strength - 10)
-    
-    # Update last daily check timestamp
-    pet.last_daily_check = now
-    
-    db.commit()
-    db.refresh(pet)
-    return {"pet": pet, "already_checked": False, "met_requirement": total_strength_yesterday >= MIN_DAILY_STRENGTH}
+            if pet_check_date.date() >= today_start.date():
+                # Already checked today, just refresh pet and return
+                db.refresh(pet)
+                return {
+                    "pet": pet, 
+                    "already_checked": True, 
+                    "met_requirement": True,
+                    "total_strength_yesterday": 0
+                }
+        
+        # Get yesterday's exercise logs
+        yesterday_start = today_start - timedelta(days=1)
+        yesterday_exercises = db.query(models.ExerciseLog).filter(
+            models.ExerciseLog.user_id == user_id,
+            models.ExerciseLog.created_at >= yesterday_start,
+            models.ExerciseLog.created_at < today_start
+        ).all()
+        
+        # Calculate total strength points gained yesterday (10 seconds = 1 point)
+        total_strength_yesterday = sum(log.duration_seconds // 10 for log in yesterday_exercises)
+        
+        # Check if met minimum requirement (60 points = 10 minutes)
+        met_requirement = total_strength_yesterday >= MIN_DAILY_STRENGTH
+        
+        if not met_requirement:
+            # Didn't meet requirement - decrease mood
+            # But only if stamina > 0 (if stamina is 0, they exercised enough)
+            if pet.stamina > 0:
+                pet.mood = max(0, pet.mood - 10)
+                
+                # If mood reaches 0 and strength > 0, decrease strength
+                if pet.mood == 0 and pet.strength > 0:
+                    pet.strength = max(0, pet.strength - 10)
+        
+        # Update last daily check timestamp
+        pet.last_daily_check = now
+        
+        db.commit()
+        db.refresh(pet)
+        
+        return {
+            "pet": pet, 
+            "already_checked": False, 
+            "met_requirement": met_requirement,
+            "total_strength_yesterday": total_strength_yesterday
+        }
+    except Exception as e:
+        db.rollback()
+        # Log the error for debugging
+        print(f"Error in perform_daily_check: {e}")
+        raise e
 
 def complete_breakthrough(db: Session, user_id: int):
     """
