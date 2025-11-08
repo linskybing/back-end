@@ -48,7 +48,6 @@ class UserCreate(BaseModel):
 class ExerciseLogBase(BaseModel):
     exercise_type: str
     duration_seconds: int
-    volume: float
     steps: int = 0
 
 class ExerciseLogCreate(ExerciseLogBase):
