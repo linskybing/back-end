@@ -183,6 +183,21 @@ def get_daily_quests(user_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Pet not found")
     return result
 
+@app.get("/users/{user_id}/daily-stats", tags=["Daily Quests"])
+def get_daily_stats(user_id: str, db: Session = Depends(get_db)):
+    """
+    Get user's daily exercise statistics.
+    
+    Returns:
+    - daily_exercise_seconds: Total exercise time today (in seconds)
+    - daily_steps: Total steps today
+    - last_reset_date: Last time stats were reset
+    """
+    result = crud.get_daily_stats(db, user_id)
+    if not result:
+        raise HTTPException(status_code=404, detail="Pet not found")
+    return result
+
 @app.post("/users/{user_id}/daily-quests/{quest_id}/claim", tags=["Daily Quests"])
 def claim_daily_quest(user_id: str, quest_id: int, db: Session = Depends(get_db)):
     """

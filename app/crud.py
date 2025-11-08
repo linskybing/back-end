@@ -316,6 +316,18 @@ def get_daily_quest_status(db: Session, user_id: str):
         "quest_3_completed": pet.daily_quest_3_completed
     }
 
+def get_daily_stats(db: Session, user_id: str):
+    """Get user's daily exercise statistics"""
+    pet = get_pet_by_user_id(db, user_id)
+    if not pet:
+        return None
+    
+    return {
+        "daily_exercise_seconds": pet.daily_exercise_seconds,
+        "daily_steps": pet.daily_steps,
+        "last_reset_date": pet.last_reset_date
+    }
+
 def claim_daily_quest_reward(db: Session, user_id: str, quest_id: int):
     """Claim reward for a completed daily quest (can only claim once)"""
     try:
