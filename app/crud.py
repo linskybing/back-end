@@ -534,8 +534,8 @@ def perform_daily_check(db: Session, user_id: str):
         
         # Reset daily quests and complete Quest 1 (daily login)
         pet.daily_quest_1_completed = False  # Quest 1: 每日登入 (ready to claim on login)
-        pet.daily_quest_2_completed = True   # Quest 2: 運動十分鐘 (not yet achieved)
-        pet.daily_quest_3_completed = True   # Quest 3: 走路5000步 (not yet achieved)
+        pet.daily_quest_2_completed = False  # Quest 2: 運動十分鐘 (not yet achieved)
+        pet.daily_quest_3_completed = False  # Quest 3: 走路5000步 (not yet achieved)
         
         if not met_requirement:
             # Didn't meet requirement - decrease mood
