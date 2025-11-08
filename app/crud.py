@@ -14,7 +14,7 @@ from datetime import datetime, date, time, timedelta
 # User
 # ==================
 
-def get_user(db: Session, user_id: int):
+def get_user(db: Session, user_id: str):
     return db.query(models.User).filter(models.User.id == user_id).first()
 
 def create_user(db: Session, user: schemas.UserCreate):
@@ -40,7 +40,7 @@ def create_user(db: Session, user: schemas.UserCreate):
 # Pet
 # ==================
 
-def get_pet_by_user_id(db: Session, user_id: int):
+def get_pet_by_user_id(db: Session, user_id: str):
     return db.query(models.Pet).filter(models.Pet.owner_id == user_id).first()
 
 def create_pet_for_user(db: Session, user: models.User, pet_name: str):
@@ -65,6 +65,9 @@ LEVEL_STAGE_MAP = {
     15: models.PetStage.BIG_CHICKEN, # After lv15 breakthrough
     20: models.PetStage.BUFF_CHICKEN # After lv20 breakthrough
 }
+# Cache sorted thresholds to avoid repeated sorting
+SORTED_LEVEL_THRESHOLDS = sorted(LEVEL_STAGE_MAP.keys(), reverse=True)
+
 MAX_LEVEL = 25
 STRENGTH_PER_LEVEL = 120  # 120 points = 1200 seconds = 20 minutes
 MIN_DAILY_STRENGTH = 60   # Minimum 60 points (10 minutes) per day to maintain mood
@@ -79,13 +82,13 @@ def get_stage_for_level(level: int, breakthrough_completed: bool) -> models.PetS
     if level % 5 == 0 and level > 1 and not breakthrough_completed:
         # Stay at previous milestone's stage
         prev_milestone = level - 5
-        for lvl_threshold in sorted(LEVEL_STAGE_MAP.keys(), reverse=True):
+        for lvl_threshold in SORTED_LEVEL_THRESHOLDS:
             if prev_milestone >= lvl_threshold:
                 return LEVEL_STAGE_MAP[lvl_threshold]
     
     # Otherwise, find the appropriate stage for current level
     stage = models.PetStage.EGG
-    for lvl_threshold in sorted(LEVEL_STAGE_MAP.keys(), reverse=True):
+    for lvl_threshold in SORTED_LEVEL_THRESHOLDS:
         if level >= lvl_threshold:
             stage = LEVEL_STAGE_MAP[lvl_threshold]
             break
@@ -201,7 +204,7 @@ def update_pet_stats(db: Session, pet: models.Pet,
 # Exercise
 # ==================
 
-def log_exercise(db: Session, user_id: int, log: schemas.ExerciseLogCreate):
+def log_exercise(db: Session, user_id: str, log: schemas.ExerciseLogCreate):
     """
     Log exercise and update pet stats.
     New logic:
@@ -247,7 +250,7 @@ QUEST_TEMPLATES = [
     {"title": "Full of Energy", "description": "Accumulate 100 exercise volume", "reward_strength": 50, "reward_mood": 10},
 ]
 
-def get_or_create_daily_quests(db: Session, user_id: int):
+def get_or_create_daily_quests(db: Session, user_id: str):
     # Check if quests for today have been generated (simplified logic)
     today_quests = db.query(models.UserQuest).filter(
         models.UserQuest.user_id == user_id,
@@ -258,28 +261,43 @@ def get_or_create_daily_quests(db: Session, user_id: int):
         return today_quests
 
     # First time or new day, generate new quests
-    new_user_quests = []
+    # Batch process: collect all quests first, then commit once
+    quests_to_create = []
     for quest_template in QUEST_TEMPLATES:
         # Ensure the quest exists in the Quest table
         q = db.query(models.Quest).filter(models.Quest.title == quest_template["title"]).first()
         if not q:
             q = models.Quest(**quest_template)
             db.add(q)
-            db.commit()
-            db.refresh(q)
-        
-        # Create user quest entry
+            quests_to_create.append(("new", q, quest_template))
+        else:
+            quests_to_create.append(("existing", q, quest_template))
+    
+    # Commit new quests if any
+    if any(status == "new" for status, _, _ in quests_to_create):
+        db.commit()
+        # Refresh new quests
+        for status, q, _ in quests_to_create:
+            if status == "new":
+                db.refresh(q)
+    
+    # Create all user quest entries
+    new_user_quests = []
+    for _, q, _ in quests_to_create:
         uq = models.UserQuest(quest_id=q.id, user_id=user_id)
         db.add(uq)
         new_user_quests.append(uq)
-        
+    
+    # Single commit for all user quests
     db.commit()
+    
+    # Load relationships
     for uq in new_user_quests:
         db.refresh(uq) # Load the 'quest' relationship
         
     return new_user_quests
 
-def complete_quest(db: Session, user_id: int, user_quest_id: int):
+def complete_quest(db: Session, user_id: str, user_quest_id: int):
     uq = db.query(models.UserQuest).filter(
         models.UserQuest.id == user_quest_id,
         models.UserQuest.user_id == user_id
@@ -309,7 +327,7 @@ def complete_quest(db: Session, user_id: int, user_quest_id: int):
 # Travel & Leaderboard
 # ==================
 
-def perform_daily_check(db: Session, user_id: int):
+def perform_daily_check(db: Session, user_id: str):
     """
     Perform daily check at 00:00 to verify if user exercised enough yesterday.
     - Resets stamina to 900 for the new day
@@ -385,7 +403,7 @@ def perform_daily_check(db: Session, user_id: int):
         print(f"Error in perform_daily_check: {e}")
         raise e
 
-def complete_breakthrough(db: Session, user_id: int):
+def complete_breakthrough(db: Session, user_id: str):
     """
     Complete breakthrough by traveling to an attraction.
     This allows the pet to continue leveling past level 5, 10, 15, 20.
@@ -450,11 +468,11 @@ def get_leaderboard_by_level(db: Session, limit: int = 10):
 # Travel Checkins (Location-based quests)
 # ==================
 
-def get_user_travel_checkins(db: Session, user_id: int):
+def get_user_travel_checkins(db: Session, user_id: str):
     "Get all travel checkins for a user"
     return db.query(models.TravelCheckin).filter(models.TravelCheckin.user_id == user_id).order_by(models.TravelCheckin.completed_at.desc()).all()
 
-def create_travel_checkin(db: Session, user_id: int, checkin: schemas.TravelCheckinCreate):
+def create_travel_checkin(db: Session, user_id: str, checkin: schemas.TravelCheckinCreate):
     "Create a new travel checkin and reward the pet."
     pet = get_pet_by_user_id(db, user_id)
     if not pet:
