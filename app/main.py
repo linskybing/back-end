@@ -44,13 +44,10 @@ def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     """
     Create a new user.
     
-    - Only username is required
+    - pet_name: Required, name for the pet
     - Returns user with id (use this id for all subsequent API calls)
-    - After creating the user, an "Egg" stage pet is automatically assigned
+    - An "Egg" stage pet with the provided name is automatically created
     """
-    db_user = crud.get_user_by_username(db, username=user.username)
-    if db_user:
-        raise HTTPException(status_code=400, detail="Username already registered")
     return crud.create_user(db=db, user=user)
 
 @app.get("/users/{user_id}", response_model=schemas.User, tags=["User"])
@@ -234,6 +231,6 @@ def get_level_leaderboard(limit: int = 10, db: Session = Depends(get_db)):
     
     # Convert to LeaderboardEntry schema
     return [
-        schemas.LeaderboardEntry(username=username, value=pet.level)
-        for pet, username in leaderboard_data
+        schemas.LeaderboardEntry(username=pet.name, value=pet.level)
+        for pet, user_id in leaderboard_data
     ]

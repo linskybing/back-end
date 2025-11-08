@@ -17,20 +17,15 @@ from datetime import datetime, date, time, timedelta
 def get_user(db: Session, user_id: int):
     return db.query(models.User).filter(models.User.id == user_id).first()
 
-def get_user_by_username(db: Session, username: str):
-    return db.query(models.User).filter(models.User.username == username).first()
-
 def create_user(db: Session, user: schemas.UserCreate):
-    # Only username is required
-    db_user = models.User(
-        username=user.username
-    )
+    # Create user
+    db_user = models.User()
     db.add(db_user)
     db.commit()
     db.refresh(db_user)
     
-    # When creating a user, automatically assign them a pet (egg)
-    create_pet_for_user(db, db_user)
+    # When creating a user, automatically assign them a pet with the provided name
+    create_pet_for_user(db, db_user, pet_name=user.pet_name)
     
     db.refresh(db_user) # Refresh to include the new pet
     return db_user
@@ -42,11 +37,11 @@ def create_user(db: Session, user: schemas.UserCreate):
 def get_pet_by_user_id(db: Session, user_id: int):
     return db.query(models.Pet).filter(models.Pet.owner_id == user_id).first()
 
-def create_pet_for_user(db: Session, user: models.User):
-    # Create a new pet, default to "EGG" stage
+def create_pet_for_user(db: Session, user: models.User, pet_name: str):
+    # Create a new pet with provided name, default to "EGG" stage
     db_pet = models.Pet(
         owner_id=user.id,
-        name=f"{user.username}'s Pet", # Changed to English, though name is data
+        name=pet_name,
         stage=models.PetStage.EGG
     )
     db.add(db_pet)
@@ -369,7 +364,7 @@ def get_random_attraction(db: Session):
     return random.choice(attractions) if attractions else None
 
 def get_leaderboard_by_level(db: Session, limit: int = 10):
-    return db.query(models.Pet, models.User.username)\
+    return db.query(models.Pet, models.User.id)\
              .join(models.User, models.Pet.owner_id == models.User.id)\
              .order_by(models.Pet.level.desc(), models.Pet.strength.desc())\
              .limit(limit)\

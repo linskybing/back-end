@@ -29,10 +29,10 @@ class PetUpdate(BaseModel):
     breakthrough_completed: Optional[bool] = None
 
 class UserBase(BaseModel):
-    username: str
+    pass
 
-class UserCreate(UserBase):
-    pass  # Only username needed
+class UserCreate(BaseModel):
+    pet_name: str  # Only pet name is required
 
 class ExerciseLogBase(BaseModel):
     exercise_type: str
