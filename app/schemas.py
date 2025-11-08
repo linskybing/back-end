@@ -84,7 +84,7 @@ class Pet(PetBase):
 class ExerciseLog(ExerciseLogBase):
     id: int
     created_at: datetime
-    user_id: int
+    user_id: str  # Changed to string to match User.id
     pet_id: int
     
     class Config:
@@ -99,7 +99,7 @@ class Quest(QuestBase):
 class UserQuest(BaseModel):
     id: int
     quest_id: int
-    user_id: int
+    user_id: str  # Changed to string to match User.id
     date: datetime
     is_completed: bool
     quest: Quest # Nested display for quest details
