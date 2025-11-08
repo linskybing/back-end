@@ -305,48 +305,15 @@ DAILY_QUEST_DEFINITIONS = [
 ]
 
 def get_daily_quest_status(db: Session, user_id: str):
-    """Get current status of all daily quests"""
+    """Get current status of all daily quests (simplified for frontend)"""
     pet = get_pet_by_user_id(db, user_id)
     if not pet:
         return None
     
     return {
-        "quests": [
-            {
-                "id": 1,
-                "title": "每日登入",
-                "description": "今天第一次登入遊戲",
-                "completed": pet.daily_quest_1_completed,
-                "progress": 1 if pet.daily_quest_1_completed else 0,
-                "goal": 1,
-                "reward_strength": 10,
-                "reward_stamina": 20,
-                "reward_mood": 5
-            },
-            {
-                "id": 2,
-                "title": "運動十分鐘",
-                "description": "累積運動時間達到10分鐘",
-                "completed": pet.daily_quest_2_completed,
-                "progress": pet.daily_exercise_seconds,
-                "goal": 600,
-                "reward_strength": 30,
-                "reward_stamina": 15,
-                "reward_mood": 10
-            },
-            {
-                "id": 3,
-                "title": "走路5000步",
-                "description": "今日累積走路5000步",
-                "completed": pet.daily_quest_3_completed,
-                "progress": pet.daily_steps,
-                "goal": 5000,
-                "reward_strength": 50,
-                "reward_stamina": 20,
-                "reward_mood": 15
-            }
-        ],
-        "last_reset_date": pet.last_reset_date
+        "quest_1_completed": pet.daily_quest_1_completed,
+        "quest_2_completed": pet.daily_quest_2_completed,
+        "quest_3_completed": pet.daily_quest_3_completed
     }
 
 def claim_daily_quest_reward(db: Session, user_id: str, quest_id: int):
