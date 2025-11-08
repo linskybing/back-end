@@ -48,7 +48,8 @@ def create_pet_for_user(db: Session, user: models.User, pet_name: str):
     db_pet = models.Pet(
         owner_id=user.id,
         name=pet_name,
-        stage=models.PetStage.EGG
+        stage=models.PetStage.EGG,
+        stamina=900  # Start with full stamina
     )
     db.add(db_pet)
     db.commit()
@@ -67,6 +68,7 @@ LEVEL_STAGE_MAP = {
 MAX_LEVEL = 25
 STRENGTH_PER_LEVEL = 120  # 120 points = 1200 seconds = 20 minutes
 MIN_DAILY_STRENGTH = 60   # Minimum 60 points (10 minutes) per day to maintain mood
+MAX_STAMINA = 900  # Maximum stamina value, reset daily
 
 def get_stage_for_level(level: int, breakthrough_completed: bool) -> models.PetStage:
     """
@@ -145,7 +147,7 @@ def update_pet_stats(db: Session, pet: models.Pet,
     - Level up: Every 120 strength points = 1 level (20 minutes)
     - Breakthrough: At levels 5, 10, 15, 20, need breakthrough to continue gaining strength
     - Mood: Increases with exercise
-    - Stamina: 0-100 range
+    - Stamina: 0-900 range (reset daily)
     """
     
     # Check if at a breakthrough level and breakthrough not completed
@@ -156,7 +158,7 @@ def update_pet_stats(db: Session, pet: models.Pet,
         # Strength gains are blocked
         strength = 0
         # Still update stamina and mood
-        pet.stamina = max(0, min(100, pet.stamina + stamina))
+        pet.stamina = max(0, min(MAX_STAMINA, pet.stamina + stamina))
         pet.mood = max(0, min(100, pet.mood + mood))
         db.commit()
         db.refresh(pet)
@@ -171,7 +173,7 @@ def update_pet_stats(db: Session, pet: models.Pet,
         pet.level += 1
         
         # Reset stamina to full on level up
-        pet.stamina = 100
+        pet.stamina = MAX_STAMINA
         pet.mood += 10  # Bonus mood on level up
         
         # Check if new level requires breakthrough
@@ -185,7 +187,7 @@ def update_pet_stats(db: Session, pet: models.Pet,
         pet.strength = 0
     
     # Update other stats
-    pet.stamina = max(0, min(100, pet.stamina + stamina))
+    pet.stamina = max(0, min(MAX_STAMINA, pet.stamina + stamina))
     pet.mood = max(0, min(100, pet.mood + mood))
     
     # Update growth stage based on level and breakthrough status
@@ -310,9 +312,9 @@ def complete_quest(db: Session, user_id: str, user_quest_id: int):
 def perform_daily_check(db: Session, user_id: str):
     """
     Perform daily check at 00:00 to verify if user exercised enough yesterday.
-    If user didn't exercise at least 10 minutes (60 strength points), decrease mood.
-    If mood reaches 0 and strength > 0, decrease strength.
-    If stamina is 0, don't decrease mood (already exercised enough).
+    - Resets stamina to 900 for the new day
+    - If user didn't exercise at least 10 minutes (60 strength points), decrease mood
+    - If mood reaches 0 and strength > 0, decrease strength
     """
     pet = get_pet_by_user_id(db, user_id)
     if not pet:
@@ -354,15 +356,16 @@ def perform_daily_check(db: Session, user_id: str):
         # Check if met minimum requirement (60 points = 10 minutes)
         met_requirement = total_strength_yesterday >= MIN_DAILY_STRENGTH
         
+        # Reset stamina to 900 for the new day
+        pet.stamina = MAX_STAMINA
+        
         if not met_requirement:
             # Didn't meet requirement - decrease mood
-            # But only if stamina > 0 (if stamina is 0, they exercised enough)
-            if pet.stamina > 0:
-                pet.mood = max(0, pet.mood - 10)
-                
-                # If mood reaches 0 and strength > 0, decrease strength
-                if pet.mood == 0 and pet.strength > 0:
-                    pet.strength = max(0, pet.strength - 10)
+            pet.mood = max(0, pet.mood - 10)
+            
+            # If mood reaches 0 and strength > 0, decrease strength
+            if pet.mood == 0 and pet.strength > 0:
+                pet.strength = max(0, pet.strength - 10)
         
         # Update last daily check timestamp
         pet.last_daily_check = now
