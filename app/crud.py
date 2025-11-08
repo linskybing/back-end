@@ -243,14 +243,8 @@ def log_exercise(db: Session, user_id: str, log: schemas.ExerciseLogCreate):
         pet.daily_exercise_seconds += log.duration_seconds
         pet.daily_steps += log.steps
         
-        # Auto-complete daily quests if conditions met
-        # Quest 2: 運動十分鐘 (600 seconds) - Mark as claimable (completed=False means can claim)
-        if pet.daily_exercise_seconds >= 600 and pet.daily_quest_2_completed:
-            pet.daily_quest_2_completed = False  # Ready to claim
-        
-        # Quest 3: 走路5000步 - Mark as claimable
-        if pet.daily_steps >= 5000 and pet.daily_quest_3_completed:
-            pet.daily_quest_3_completed = False  # Ready to claim
+        # NOTE: 不再直接在這裡翻轉 daily_quest_X_completed 的布林旗標（避免語意混淆）。
+        # 判定是否可以領獎改由 claim_daily_quest_reward 在領取時檢查 daily_exercise_seconds / daily_steps。
         
         # Calculate pet stat changes based on exercise duration
         # 10 seconds = 1 strength point
@@ -305,15 +299,31 @@ DAILY_QUEST_DEFINITIONS = [
 ]
 
 def get_daily_quest_status(db: Session, user_id: str):
-    """Get current status of all daily quests (simplified for frontend)"""
+    """Get current status of all daily quests (simplified for frontend)
+
+    Returns both 'claimed' (True = already claimed) and 'claimable' (True = can claim now)
+    """
     pet = get_pet_by_user_id(db, user_id)
     if not pet:
         return None
     
+    # We treat pet.daily_quest_X_completed as 'claimed' flags (True = already claimed).
+    quest1_claimed = bool(pet.daily_quest_1_completed)
+    quest2_claimed = bool(pet.daily_quest_2_completed)
+    quest3_claimed = bool(pet.daily_quest_3_completed)
+    
+    # Compute claimable based on progress and claimed flags
+    quest1_claimable = (not quest1_claimed)  # quest1: daily login; perform_daily_check should set ready
+    quest2_claimable = (not quest2_claimed) and (pet.daily_exercise_seconds >= 600)
+    quest3_claimable = (not quest3_claimed) and (pet.daily_steps >= 5000)
+    
     return {
-        "quest_1_completed": pet.daily_quest_1_completed,
-        "quest_2_completed": pet.daily_quest_2_completed,
-        "quest_3_completed": pet.daily_quest_3_completed
+        "quest_1_claimed": quest1_claimed,
+        "quest_1_claimable": quest1_claimable,
+        "quest_2_claimed": quest2_claimed,
+        "quest_2_claimable": quest2_claimable,
+        "quest_3_claimed": quest3_claimed,
+        "quest_3_claimable": quest3_claimable
     }
 
 def get_daily_stats(db: Session, user_id: str):
@@ -329,33 +339,46 @@ def get_daily_stats(db: Session, user_id: str):
     }
 
 def claim_daily_quest_reward(db: Session, user_id: str, quest_id: int):
-    """Claim reward for a completed daily quest (can only claim once)"""
+    """Claim reward for a completed daily quest (can only claim once)
+
+    Semantics:
+    - pet.daily_quest_X_completed is used as 'claimed' flag (True = already claimed).
+    - To be claimable:
+      - quest 1: allowed if not already claimed (login quest; perform_daily_check resets claimed -> False daily)
+      - quest 2: pet.daily_exercise_seconds >= 600 and not claimed
+      - quest 3: pet.daily_steps >= 5000 and not claimed
+    """
     try:
         pet = get_pet_by_user_id(db, user_id)
         if not pet:
             return None
         
-        # Check if quest is ready to claim (completed=False means claimable)
+        # Quest 1: daily login
         if quest_id == 1:
             if pet.daily_quest_1_completed:
-                return {"success": False, "message": "Quest not completed yet"}
-            # Mark as claimed (completed=True means already claimed)
+                return {"success": False, "message": "Quest already claimed"}
+            # Claim is allowed (perform_daily_check should set daily_quest_1_completed = False at reset)
             pet.daily_quest_1_completed = True
             quest_def = DAILY_QUEST_DEFINITIONS[0]
         elif quest_id == 2:
+            # Need to ensure exercise threshold met
             if pet.daily_quest_2_completed:
-                return {"success": False, "message": "Quest not completed yet"}
+                return {"success": False, "message": "Quest already claimed"}
+            if pet.daily_exercise_seconds < 600:
+                return {"success": False, "message": "Exercise requirement not met"}
             pet.daily_quest_2_completed = True
             quest_def = DAILY_QUEST_DEFINITIONS[1]
         elif quest_id == 3:
             if pet.daily_quest_3_completed:
-                return {"success": False, "message": "Quest not completed yet"}
+                return {"success": False, "message": "Quest already claimed"}
+            if pet.daily_steps < 5000:
+                return {"success": False, "message": "Step requirement not met"}
             pet.daily_quest_3_completed = True
             quest_def = DAILY_QUEST_DEFINITIONS[2]
         else:
             return {"success": False, "message": "Invalid quest ID"}
         
-        # Apply rewards
+        # Apply rewards (update_pet_stats will commit and refresh pet)
         result = update_pet_stats(
             db=db,
             pet=pet,
@@ -483,6 +506,7 @@ def perform_daily_check(db: Session, user_id: str):
     - Resets stamina to 900 for the new day
     - If user didn't exercise at least 10 minutes (60 strength points), decrease mood
     - If mood reaches 0 and strength > 0, decrease strength
+    - Reset daily quest claimed flags: set claimed=False so they can be claimed in the new day.
     """
     pet = get_pet_by_user_id(db, user_id)
     if not pet:
@@ -494,7 +518,6 @@ def perform_daily_check(db: Session, user_id: str):
         
         # Check if daily check already performed today
         if pet.last_daily_check:
-            # Need to make both timezone-aware or both naive for comparison
             pet_check_date = pet.last_daily_check
             if pet_check_date.tzinfo is None:
                 pet_check_date = pet_check_date.replace(tzinfo=None)
@@ -532,10 +555,10 @@ def perform_daily_check(db: Session, user_id: str):
         pet.daily_steps = 0
         pet.last_reset_date = now
         
-        # Reset daily quests and complete Quest 1 (daily login)
-        pet.daily_quest_1_completed = False  # Quest 1: 每日登入 (ready to claim on login)
-        pet.daily_quest_2_completed = False  # Quest 2: 運動十分鐘 (not yet achieved)
-        pet.daily_quest_3_completed = False  # Quest 3: 走路5000步 (not yet achieved)
+        # Reset daily quest claimed flags (False means not yet claimed for the new day)
+        pet.daily_quest_1_completed = False  # Quest 1: 每日登入 (not claimed yet)
+        pet.daily_quest_2_completed = False  # Quest 2: 運動十分鐘 (not claimed yet)
+        pet.daily_quest_3_completed = False  # Quest 3: 走路5000步 (not claimed yet)
         
         if not met_requirement:
             # Didn't meet requirement - decrease mood
