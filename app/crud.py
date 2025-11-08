@@ -18,23 +18,28 @@ def get_user(db: Session, user_id: str):
     return db.query(models.User).filter(models.User.id == user_id).first()
 
 def create_user(db: Session, user: schemas.UserCreate):
-    # Check if user already exists
-    existing_user = get_user(db, user.user_id)
-    if existing_user:
-        # User already exists, just return it
-        return existing_user
-    
-    # Create user with provided user_id
-    db_user = models.User(id=user.user_id)
-    db.add(db_user)
-    db.commit()
-    db.refresh(db_user)
-    
-    # When creating a user, automatically assign them a pet with the provided name
-    create_pet_for_user(db, db_user, pet_name=user.pet_name)
-    
-    db.refresh(db_user) # Refresh to include the new pet
-    return db_user
+    try:
+        # Check if user already exists
+        existing_user = get_user(db, user.user_id)
+        if existing_user:
+            # User already exists, just return it
+            return existing_user
+        
+        # Create user with provided user_id
+        db_user = models.User(id=user.user_id)
+        db.add(db_user)
+        db.commit()
+        db.refresh(db_user)
+        
+        # When creating a user, automatically assign them a pet with the provided name
+        create_pet_for_user(db, db_user, pet_name=user.pet_name)
+        
+        db.refresh(db_user) # Refresh to include the new pet
+        return db_user
+    except Exception as e:
+        db.rollback()
+        print(f"Error in create_user: {e}")
+        raise e
 
 # ==================
 # Pet
@@ -44,17 +49,22 @@ def get_pet_by_user_id(db: Session, user_id: str):
     return db.query(models.Pet).filter(models.Pet.owner_id == user_id).first()
 
 def create_pet_for_user(db: Session, user: models.User, pet_name: str):
-    # Create a new pet with provided name, default to "EGG" stage
-    db_pet = models.Pet(
-        owner_id=user.id,
-        name=pet_name,
-        stage=models.PetStage.EGG,
-        stamina=900  # Start with full stamina
-    )
-    db.add(db_pet)
-    db.commit()
-    db.refresh(db_pet)
-    return db_pet
+    try:
+        # Create a new pet with provided name, default to "EGG" stage
+        db_pet = models.Pet(
+            owner_id=user.id,
+            name=pet_name,
+            stage=models.PetStage.EGG,
+            stamina=900  # Start with full stamina
+        )
+        db.add(db_pet)
+        db.commit()
+        db.refresh(db_pet)
+        return db_pet
+    except Exception as e:
+        db.rollback()
+        print(f"Error in create_pet_for_user: {e}")
+        raise e
 
 # Map of levels to stages (only after breakthrough)
 # Stage evolution happens AFTER breakthrough at level milestones
@@ -152,53 +162,57 @@ def update_pet_stats(db: Session, pet: models.Pet,
     - Mood: Increases with exercise
     - Stamina: 0-900 range (reset daily)
     """
-    
-    # Check if at a breakthrough level and breakthrough not completed
-    needs_breakthrough = (pet.level % 5 == 0) and (pet.level >= 5) and not pet.breakthrough_completed
-    
-    if needs_breakthrough and strength > 0:
-        # Cannot gain strength without breakthrough - return warning
-        # Strength gains are blocked
-        strength = 0
-        # Still update stamina and mood
+    try:
+        # Check if at a breakthrough level and breakthrough not completed
+        needs_breakthrough = (pet.level % 5 == 0) and (pet.level >= 5) and not pet.breakthrough_completed
+        
+        if needs_breakthrough and strength > 0:
+            # Cannot gain strength without breakthrough - return warning
+            # Strength gains are blocked
+            strength = 0
+            # Still update stamina and mood
+            pet.stamina = max(0, min(MAX_STAMINA, pet.stamina + stamina))
+            pet.mood = max(0, min(100, pet.mood + mood))
+            db.commit()
+            db.refresh(pet)
+            return {"pet": pet, "breakthrough_required": True}
+        
+        # Apply strength gains
+        pet.strength += strength
+        
+        # Check for level up (120 strength points = 1 level)
+        while pet.strength >= STRENGTH_PER_LEVEL and pet.level < MAX_LEVEL:
+            pet.strength -= STRENGTH_PER_LEVEL
+            pet.level += 1
+            
+            # Reset stamina to full on level up
+            pet.stamina = MAX_STAMINA
+            pet.mood += 10  # Bonus mood on level up
+            
+            # Check if new level requires breakthrough
+            if pet.level % 5 == 0 and pet.level >= 5:
+                pet.breakthrough_completed = False
+                # Stop further leveling until breakthrough
+                break
+        
+        # Cap strength at max for current level if at breakthrough
+        if pet.level % 5 == 0 and pet.level >= 5 and not pet.breakthrough_completed:
+            pet.strength = 0
+        
+        # Update other stats
         pet.stamina = max(0, min(MAX_STAMINA, pet.stamina + stamina))
         pet.mood = max(0, min(100, pet.mood + mood))
+        
+        # Update growth stage based on level and breakthrough status
+        pet.stage = get_stage_for_level(pet.level, pet.breakthrough_completed)
+        
         db.commit()
         db.refresh(pet)
-        return {"pet": pet, "breakthrough_required": True}
-    
-    # Apply strength gains
-    pet.strength += strength
-    
-    # Check for level up (120 strength points = 1 level)
-    while pet.strength >= STRENGTH_PER_LEVEL and pet.level < MAX_LEVEL:
-        pet.strength -= STRENGTH_PER_LEVEL
-        pet.level += 1
-        
-        # Reset stamina to full on level up
-        pet.stamina = MAX_STAMINA
-        pet.mood += 10  # Bonus mood on level up
-        
-        # Check if new level requires breakthrough
-        if pet.level % 5 == 0 and pet.level >= 5:
-            pet.breakthrough_completed = False
-            # Stop further leveling until breakthrough
-            break
-    
-    # Cap strength at max for current level if at breakthrough
-    if pet.level % 5 == 0 and pet.level >= 5 and not pet.breakthrough_completed:
-        pet.strength = 0
-    
-    # Update other stats
-    pet.stamina = max(0, min(MAX_STAMINA, pet.stamina + stamina))
-    pet.mood = max(0, min(100, pet.mood + mood))
-    
-    # Update growth stage based on level and breakthrough status
-    pet.stage = get_stage_for_level(pet.level, pet.breakthrough_completed)
-    
-    db.commit()
-    db.refresh(pet)
-    return {"pet": pet, "breakthrough_required": False}
+        return {"pet": pet, "breakthrough_required": False}
+    except Exception as e:
+        db.rollback()
+        print(f"Error in update_pet_stats: {e}")
+        raise e
 
 # ==================
 # Exercise
@@ -212,32 +226,37 @@ def log_exercise(db: Session, user_id: str, log: schemas.ExerciseLogCreate):
     - Stamina cost: 10 per exercise session
     - Mood increase: 5 per exercise session
     """
-    pet = get_pet_by_user_id(db, user_id)
-    if not pet:
-        return None
+    try:
+        pet = get_pet_by_user_id(db, user_id)
+        if not pet:
+            return None
 
-    db_log = models.ExerciseLog(
-        **log.dict(),
-        user_id=user_id,
-        pet_id=pet.id
-    )
-    db.add(db_log)
-    
-    # Calculate pet stat changes based on exercise duration
-    # 10 seconds = 1 strength point
-    strength_gain = log.duration_seconds // 10
-    stamina_cost = -10
-    mood_gain = 5
+        db_log = models.ExerciseLog(
+            **log.dict(),
+            user_id=user_id,
+            pet_id=pet.id
+        )
+        db.add(db_log)
+        
+        # Calculate pet stat changes based on exercise duration
+        # 10 seconds = 1 strength point
+        strength_gain = log.duration_seconds // 10
+        stamina_cost = -10
+        mood_gain = 5
 
-    result = update_pet_stats(
-        db=db,
-        pet=pet,
-        strength=strength_gain,
-        stamina=stamina_cost,
-        mood=mood_gain
-    )
-    
-    return result
+        result = update_pet_stats(
+            db=db,
+            pet=pet,
+            strength=strength_gain,
+            stamina=stamina_cost,
+            mood=mood_gain
+        )
+        
+        return result
+    except Exception as e:
+        db.rollback()
+        print(f"Error in log_exercise: {e}")
+        raise e
 
 # ==================
 # Quest
@@ -251,77 +270,87 @@ QUEST_TEMPLATES = [
 ]
 
 def get_or_create_daily_quests(db: Session, user_id: str):
-    # Check if quests for today have been generated (simplified logic)
-    today_quests = db.query(models.UserQuest).filter(
-        models.UserQuest.user_id == user_id,
-        # Should add date filtering: (func.date(models.UserQuest.date) == datetime.date.today())
-    ).all()
-    
-    if today_quests:
-        return today_quests
-
-    # First time or new day, generate new quests
-    # Batch process: collect all quests first, then commit once
-    quests_to_create = []
-    for quest_template in QUEST_TEMPLATES:
-        # Ensure the quest exists in the Quest table
-        q = db.query(models.Quest).filter(models.Quest.title == quest_template["title"]).first()
-        if not q:
-            q = models.Quest(**quest_template)
-            db.add(q)
-            quests_to_create.append(("new", q, quest_template))
-        else:
-            quests_to_create.append(("existing", q, quest_template))
-    
-    # Commit new quests if any
-    if any(status == "new" for status, _, _ in quests_to_create):
-        db.commit()
-        # Refresh new quests
-        for status, q, _ in quests_to_create:
-            if status == "new":
-                db.refresh(q)
-    
-    # Create all user quest entries
-    new_user_quests = []
-    for _, q, _ in quests_to_create:
-        uq = models.UserQuest(quest_id=q.id, user_id=user_id)
-        db.add(uq)
-        new_user_quests.append(uq)
-    
-    # Single commit for all user quests
-    db.commit()
-    
-    # Load relationships
-    for uq in new_user_quests:
-        db.refresh(uq) # Load the 'quest' relationship
+    try:
+        # Check if quests for today have been generated (simplified logic)
+        today_quests = db.query(models.UserQuest).filter(
+            models.UserQuest.user_id == user_id,
+            # Should add date filtering: (func.date(models.UserQuest.date) == datetime.date.today())
+        ).all()
         
-    return new_user_quests
+        if today_quests:
+            return today_quests
+
+        # First time or new day, generate new quests
+        # Batch process: collect all quests first, then commit once
+        quests_to_create = []
+        for quest_template in QUEST_TEMPLATES:
+            # Ensure the quest exists in the Quest table
+            q = db.query(models.Quest).filter(models.Quest.title == quest_template["title"]).first()
+            if not q:
+                q = models.Quest(**quest_template)
+                db.add(q)
+                quests_to_create.append(("new", q, quest_template))
+            else:
+                quests_to_create.append(("existing", q, quest_template))
+        
+        # Commit new quests if any
+        if any(status == "new" for status, _, _ in quests_to_create):
+            db.commit()
+            # Refresh new quests
+            for status, q, _ in quests_to_create:
+                if status == "new":
+                    db.refresh(q)
+        
+        # Create all user quest entries
+        new_user_quests = []
+        for _, q, _ in quests_to_create:
+            uq = models.UserQuest(quest_id=q.id, user_id=user_id)
+            db.add(uq)
+            new_user_quests.append(uq)
+        
+        # Single commit for all user quests
+        db.commit()
+        
+        # Load relationships
+        for uq in new_user_quests:
+            db.refresh(uq) # Load the 'quest' relationship
+            
+        return new_user_quests
+    except Exception as e:
+        db.rollback()
+        print(f"Error in get_or_create_daily_quests: {e}")
+        raise e
 
 def complete_quest(db: Session, user_id: str, user_quest_id: int):
-    uq = db.query(models.UserQuest).filter(
-        models.UserQuest.id == user_quest_id,
-        models.UserQuest.user_id == user_id
-    ).first()
+    try:
+        uq = db.query(models.UserQuest).filter(
+            models.UserQuest.id == user_quest_id,
+            models.UserQuest.user_id == user_id
+        ).first()
 
-    if not uq or uq.is_completed:
-        return None # Quest doesn't exist or is already completed
-    
-    # Mark quest as completed
-    uq.is_completed = True
-    db.commit()  # Commit the quest completion first
-    
-    # Apply rewards
-    pet = get_pet_by_user_id(db, user_id)
-    result = update_pet_stats(
-        db=db,
-        pet=pet,
-        strength=uq.quest.reward_strength,
-        stamina=uq.quest.reward_stamina,
-        mood=uq.quest.reward_mood
-    )
-    
-    # No need to commit again - update_pet_stats already commits
-    return result
+        if not uq or uq.is_completed:
+            return None # Quest doesn't exist or is already completed
+        
+        # Mark quest as completed
+        uq.is_completed = True
+        db.commit()  # Commit the quest completion first
+        
+        # Apply rewards
+        pet = get_pet_by_user_id(db, user_id)
+        result = update_pet_stats(
+            db=db,
+            pet=pet,
+            strength=uq.quest.reward_strength,
+            stamina=uq.quest.reward_stamina,
+            mood=uq.quest.reward_mood
+        )
+        
+        # No need to commit again - update_pet_stats already commits
+        return result
+    except Exception as e:
+        db.rollback()
+        print(f"Error in complete_quest: {e}")
+        raise e
 
 # ==================
 # Travel & Leaderboard
@@ -408,27 +437,32 @@ def complete_breakthrough(db: Session, user_id: str):
     Complete breakthrough by traveling to an attraction.
     This allows the pet to continue leveling past level 5, 10, 15, 20.
     """
-    pet = get_pet_by_user_id(db, user_id)
-    if not pet:
-        return None
-    
-    # Check if at a breakthrough level
-    if pet.level % 5 != 0 or pet.level < 5:
-        return {"success": False, "message": "Not at a breakthrough level"}
-    
-    if pet.breakthrough_completed:
-        return {"success": False, "message": "Breakthrough already completed for this level"}
-    
-    # Mark breakthrough as completed
-    pet.breakthrough_completed = True
-    
-    # Update stage after breakthrough
-    pet.stage = get_stage_for_level(pet.level, pet.breakthrough_completed)
-    
-    db.commit()
-    db.refresh(pet)
-    
-    return {"success": True, "pet": pet, "message": "Breakthrough completed!"}
+    try:
+        pet = get_pet_by_user_id(db, user_id)
+        if not pet:
+            return None
+        
+        # Check if at a breakthrough level
+        if pet.level % 5 != 0 or pet.level < 5:
+            return {"success": False, "message": "Not at a breakthrough level"}
+        
+        if pet.breakthrough_completed:
+            return {"success": False, "message": "Breakthrough already completed for this level"}
+        
+        # Mark breakthrough as completed
+        pet.breakthrough_completed = True
+        
+        # Update stage after breakthrough
+        pet.stage = get_stage_for_level(pet.level, pet.breakthrough_completed)
+        
+        db.commit()
+        db.refresh(pet)
+        
+        return {"success": True, "pet": pet, "message": "Breakthrough completed!"}
+    except Exception as e:
+        db.rollback()
+        print(f"Error in complete_breakthrough: {e}")
+        raise e
 
 # ==================
 # Travel & Leaderboard (continued)
@@ -474,45 +508,50 @@ def get_user_travel_checkins(db: Session, user_id: str):
 
 def create_travel_checkin(db: Session, user_id: str, checkin: schemas.TravelCheckinCreate):
     "Create a new travel checkin and reward the pet."
-    pet = get_pet_by_user_id(db, user_id)
-    if not pet:
-        raise ValueError("Pet not found")
-    
-    # Check if already checked in at this location
-    existing = db.query(models.TravelCheckin).filter(
-        models.TravelCheckin.user_id == user_id,
-        models.TravelCheckin.quest_id == checkin.quest_id
-    ).first()
-    if existing:
-        raise ValueError("Already checked in at this location")
-    
-    # Create checkin record
-    db_checkin = models.TravelCheckin(
-        user_id=user_id, 
-        quest_id=checkin.quest_id, 
-        lat=checkin.lat, 
-        lng=checkin.lng
-    )
-    db.add(db_checkin)
-    db.commit()
-    db.refresh(db_checkin)
-    
-    # Check if at a breakthrough level and auto-complete breakthrough
-    at_breakthrough = (pet.level % 5 == 0) and (pet.level >= 5) and not pet.breakthrough_completed
-    if at_breakthrough:
-        pet.breakthrough_completed = True
-        pet.stage = get_stage_for_level(pet.level, pet.breakthrough_completed)
+    try:
+        pet = get_pet_by_user_id(db, user_id)
+        if not pet:
+            raise ValueError("Pet not found")
+        
+        # Check if already checked in at this location
+        existing = db.query(models.TravelCheckin).filter(
+            models.TravelCheckin.user_id == user_id,
+            models.TravelCheckin.quest_id == checkin.quest_id
+        ).first()
+        if existing:
+            raise ValueError("Already checked in at this location")
+        
+        # Create checkin record
+        db_checkin = models.TravelCheckin(
+            user_id=user_id, 
+            quest_id=checkin.quest_id, 
+            lat=checkin.lat, 
+            lng=checkin.lng
+        )
+        db.add(db_checkin)
         db.commit()
-        db.refresh(pet)
-    
-    # Apply rewards using update_pet_stats for proper level-up logic
-    # Give stamina reward for travel checkin
-    result = update_pet_stats(
-        db=db,
-        pet=pet,
-        strength=15,
-        stamina=10,  # Add stamina reward
-        mood=10
-    )
-    
-    return {"pet": result["pet"], "checkin": db_checkin, "breakthrough_completed": at_breakthrough}
+        db.refresh(db_checkin)
+        
+        # Check if at a breakthrough level and auto-complete breakthrough
+        at_breakthrough = (pet.level % 5 == 0) and (pet.level >= 5) and not pet.breakthrough_completed
+        if at_breakthrough:
+            pet.breakthrough_completed = True
+            pet.stage = get_stage_for_level(pet.level, pet.breakthrough_completed)
+            db.commit()
+            db.refresh(pet)
+        
+        # Apply rewards using update_pet_stats for proper level-up logic
+        # Give stamina reward for travel checkin
+        result = update_pet_stats(
+            db=db,
+            pet=pet,
+            strength=15,
+            stamina=10,  # Add stamina reward
+            mood=10
+        )
+        
+        return {"pet": result["pet"], "checkin": db_checkin, "breakthrough_completed": at_breakthrough}
+    except Exception as e:
+        db.rollback()
+        print(f"Error in create_travel_checkin: {e}")
+        raise e

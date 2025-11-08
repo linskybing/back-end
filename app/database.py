@@ -21,7 +21,15 @@ if SQLALCHEMY_DATABASE_URL is None:
 else:
     # For Docker Compose, this might be:
     # "postgresql://your_user:your_password@db:5432/pet_fitness_db"
-    engine = create_engine(SQLALCHEMY_DATABASE_URL)
+    # Increase pool size to handle more concurrent connections
+    engine = create_engine(
+        SQLALCHEMY_DATABASE_URL,
+        pool_size=20,  # Increased from default 5
+        max_overflow=40,  # Increased from default 10
+        pool_timeout=30,
+        pool_pre_ping=True,  # Verify connections before using
+        pool_recycle=3600  # Recycle connections after 1 hour
+    )
 
 # Create a database Session
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
